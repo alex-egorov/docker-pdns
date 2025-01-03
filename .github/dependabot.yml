@@ -1,7 +1,11 @@
 version: 2
 updates:
   - package-ecosystem: "docker"
-    directory: "/pdns"
+    directory: "/pdns-mysql"
+    schedule:
+      interval: "monthly"
+  - package-ecosystem: "docker"
+    directory: "/pdns-pgsql"
     schedule:
       interval: "monthly"
   - package-ecosystem: "docker"
@@ -9,6 +13,6 @@ updates:
     schedule:
       interval: "monthly"
   - package-ecosystem: "docker"
-    directory: "/pdns-admin-base-ngoduykhanh"
+    directory: "/pdns-admin"
     schedule:
       interval: "monthly"

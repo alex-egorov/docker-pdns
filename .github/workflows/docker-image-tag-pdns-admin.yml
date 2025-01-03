@@ -1,9 +1,9 @@
-name: Docker Image CI pdns-recursor alpine
+name: Docker Image CI pdns-admin
 
 on:
   push:
     tags:
-      - 'pdns-recursor-alpine-*'
+      - 'pdns-admin-*'
 
 jobs:
 
@@ -33,16 +33,16 @@ jobs:
         id: vars
         run: echo ::set-output name=version::${GITHUB_REF##*-}
 
-      - name: Build and push PDNS Recursor
-        id: docker_build_recursor
+      - name: Build and push PDNS Admin
+        id: docker_build_pdns_admin
         uses: docker/build-push-action@v5
         with:
-          context: ./pdns-recursor
-          file: ./pdns-recursor/Dockerfile.alpine
+          context: ./pdns-admin
+          file: ./pdns-admin/Dockerfile
           platforms: linux/amd64,linux/arm64
           builder: ${{ steps.buildx.outputs.name }}
           push: true
-          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/pdns-recursor:${{ steps.vars.outputs.version }}-alpine
+          tags: ${{ secrets.DOCKER_HUB_USERNAME }}/pdns-admin:${{ steps.vars.outputs.version }}
 
       - name: Image digest
-        run: echo ${{ steps.docker_build_recursor.outputs.digest }}
+        run: echo ${{ steps.docker_build_pdns_admin.outputs.digest }}
