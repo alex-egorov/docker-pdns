@@ -6,25 +6,28 @@ RUN arch=$([ "$(arch)" = 'aarch64' ] && echo -n 'arm64' || echo -n 'amd64') \
   && sed -i 's/enabled=1/enabled=0/g' /etc/yum.repos.d/fedora-cisco-openh264.repo \
   && dnf --refresh upgrade \
   && dnf install \
-    pdns-recursor \
+    hostname \
+    pdns \
+    postgresql16 \
     https://github.com/TektonOps/subvars/releases/download/v0.1.5/subvars_${arch}.rpm \
+  && dnf --setopt 'tsflags=' install pdns-backend-postgresql \
   && dnf clean all
 
-RUN mkdir -p /etc/pdns-recursor/api.d /run/pdns-recursor \
-  && chown -R pdns-recursor: /etc/pdns-recursor /run/pdns-recursor
+RUN mkdir -p /run/pdns \
+  && chown -R pdns: /etc/pdns /run/pdns
 
-COPY recursor.conf.tpl docker-entrypoint.sh /
+COPY pdns.conf.tpl docker-entrypoint.sh /
 
-ENV VERSION=5.1 \
-  PDNS_setuid=pdns-recursor \
-  PDNS_setgid=pdns-recursor \
-  PDNS_daemon=no \
-  PDNS_loglevel=5
+ENV VERSION=4.9 \
+  PDNS_guardian=yes \
+  PDNS_setuid=pdns \
+  PDNS_setgid=pdns \
+  PDNS_launch=gpgsql
 
 EXPOSE 53 53/udp
 
-HEALTHCHECK --interval=10s --timeout=10s --retries=3 --start-period=2s CMD ["rec_control", "ping"]
+HEALTHCHECK --interval=10s --timeout=10s --retries=3 --start-period=2s CMD ["pdns_control", "ping"]
 
 ENTRYPOINT [ "/docker-entrypoint.sh" ]
 
-CMD [ "/usr/sbin/pdns_recursor" ]
+CMD [ "/usr/sbin/pdns_server" ]

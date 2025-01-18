@@ -1,5 +1,6 @@
 ---
-- hosts: localhost
+- name: PDNS mysql
+  hosts: localhost
   vars:
     pdns_master_ip: 172.5.0.20
     pdns_slave_ip: 172.5.0.21
@@ -8,9 +9,9 @@
     i_state: present
     alpine: false
   tasks:
-    - name: create docker network
-      docker_network:
-        name: pdns-net
+    - name: Create docker network
+      community.docker.docker_network:
+        name: pdns-net-mysql
         state: present
         ipam_config:
           - subnet: '172.5.0.0/16'
@@ -20,8 +21,8 @@
         - pdns-admin
         - pdns-recursor
 
-    - name: build pdns recursor
-      docker_image:
+    - name: Build pdns recursor
+      community.docker.docker_image:
         name: pschiffe/pdns-recursor
         state: '{{ i_state }}'
         source: build
@@ -32,8 +33,8 @@
       tags:
         - pdns-recursor
 
-    - name: build pdns recursor alpine version
-      docker_image:
+    - name: Build pdns recursor alpine version
+      community.docker.docker_image:
         name: pschiffe/pdns-recursor
         tag: alpine
         state: '{{ i_state }}'
@@ -46,73 +47,76 @@
       tags:
         - pdns-recursor
 
-    - name: pdns recursor
-      docker_container:
-        name: pdns-recursor
+    - name: PDNS recursor
+      community.docker.docker_container:
+        name: pdns-recursor-mysql
         image: pschiffe/pdns-recursor:{{ "alpine" if alpine | bool else "latest" }}
         state: '{{ c_state }}'
-        networks_cli_compatible: true
         networks:
-          - name: pdns-net
+          - name: pdns-net-mysql
         volumes:
           - /etc/localtime:/etc/localtime:ro
+        ulimits:
+          - 'nofile:10000:10000'
       tags:
         - pdns-recursor
 
-    - name: db
-      docker_container:
+    - name: DB
+      community.docker.docker_container:
         name: pdns-mariadb
-        image: mariadb:10.6
+        image: mariadb:11-ubi
         pull: true
         state: '{{ c_state }}'
-        networks_cli_compatible: true
         networks:
-          - name: pdns-net
+          - name: pdns-net-mysql
             aliases:
               - db
               - mysql
         volumes:
           - /etc/localtime:/etc/localtime:ro
-          - pdns-mariadb-volume:/var/lib/mysql:z
+          - pdns-mariadb-volume:/var/lib/mysql:Z
         env:
           MYSQL_ROOT_PASSWORD: 'my-secret-pw'
         healthcheck:
-          test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost']
+          test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
           timeout: 10s
           retries: 5
       tags:
         - db
 
-    - name: phpmyadmin
-      docker_container:
+    - name: Phpmyadmin
+      community.docker.docker_container:
         name: pdns-phpmyadmin
-        image: phpmyadmin/phpmyadmin:5
+        image: phpmyadmin:5
         pull: true
         state: '{{ c_state }}'
-        networks_cli_compatible: true
         networks:
-          - name: pdns-net
+          - name: pdns-net-mysql
         published_ports:
           - '8888:80'
         volumes:
           - /etc/localtime:/etc/localtime:ro
+        healthcheck:
+          test: ['CMD', 'curl', '-fsSL', 'http://127.0.0.1:80']
+          timeout: 10s
+          retries: 5
       tags:
         - db
 
-    - name: build pdns
-      docker_image:
+    - name: Build pdns mysql
+      community.docker.docker_image:
         name: pschiffe/pdns-mysql
         state: '{{ i_state }}'
         source: build
         force_source: true
         build:
           pull: true
-          path: ./pdns
+          path: ./pdns-mysql
       tags:
         - pdns
 
-    - name: build pdns alpine version
-      docker_image:
+    - name: Build pdns mysql alpine version
+      community.docker.docker_image:
         name: pschiffe/pdns-mysql
         tag: alpine
         state: '{{ i_state }}'
@@ -120,21 +124,22 @@
         force_source: true
         build:
           pull: true
-          path: ./pdns
+          path: ./pdns-mysql
           dockerfile: Dockerfile.alpine
       tags:
         - pdns
 
-    - name: pdns master
-      docker_container:
-        name: pdns
+    - name: PDNS mysql master
+      community.docker.docker_container:
+        name: pdns-mysql
         image: pschiffe/pdns-mysql:{{ "alpine" if alpine | bool else "latest" }}
         state: '{{ c_state }}'
         hostname: ns1.example.com
-        networks_cli_compatible: true
         networks:
-          - name: pdns-net
+          - name: pdns-net-mysql
             ipv4_address: '{{ pdns_master_ip }}'
+            aliases:
+              - pdns
         etc_hosts:
           ns1.example.com: '{{ pdns_master_ip }}'
           ns2.example.com: '{{ pdns_slave_ip }}'
@@ -142,7 +147,7 @@
           - /etc/localtime:/etc/localtime:ro
         env:
           PDNS_gmysql_password: 'my-secret-pw'
-          PDNS_master: 'yes'
+          PDNS_primary: 'yes'
           PDNS_api: 'yes'
           PDNS_api_key: 'secret'
           PDNS_webserver: 'yes'
@@ -155,15 +160,14 @@
       tags:
         - pdns
 
-    - name: pdns slave
-      docker_container:
-        name: pdns-slave
+    - name: PDNS mysql slave
+      community.docker.docker_container:
+        name: pdns-mysql-slave
         image: pschiffe/pdns-mysql:{{ "alpine" if alpine | bool else "latest" }}
         state: '{{ c_state }}'
         hostname: ns2.example.com
-        networks_cli_compatible: true
         networks:
-          - name: pdns-net
+          - name: pdns-net-mysql
             ipv4_address: '{{ pdns_slave_ip }}'
         etc_hosts:
           ns1.example.com: '{{ pdns_master_ip }}'
@@ -173,8 +177,8 @@
         env:
           PDNS_gmysql_dbname: 'powerdnsslave'
           PDNS_gmysql_password: 'my-secret-pw'
-          PDNS_slave: 'yes'
-          PDNS_superslave: 'yes'
+          PDNS_secondary: 'yes'
+          PDNS_autosecondary: 'yes'
           PDNS_webserver: 'yes'
           PDNS_webserver_address: '0.0.0.0'
           PDNS_webserver_allow_from: '172.5.0.0/16'
@@ -185,87 +189,47 @@
       tags:
         - pdns
 
-    - name: build pdns-admin base
-      docker_image:
-        name: pschiffe/pdns-admin-base
+    - name: Build pdns-admin
+      community.docker.docker_image:
+        name: pschiffe/pdns-admin
         tag: latest
         state: '{{ i_state }}'
         source: build
         force_source: true
         build:
           pull: true
-          path: ./pdns-admin-base-ngoduykhanh
+          path: ./pdns-admin
       tags:
         - pdns-admin
 
-    - name: build pdns-admin backend
-      docker_image:
-        name: pschiffe/pdns-admin-uwsgi
-        tag: latest
-        state: '{{ i_state }}'
-        source: build
-        force_source: true
-        build:
-          pull: false
-          path: ./pdns-admin-uwsgi-ngoduykhanh
-      tags:
-        - pdns-admin
-
-    - name: build pdns-admin frontent
-      docker_image:
-        name: pschiffe/pdns-admin-static
-        tag: latest
-        state: '{{ i_state }}'
-        source: build
-        force_source: true
-        build:
-          pull: false
-          path: ./pdns-admin-static-ngoduykhanh
-      tags:
-        - pdns-admin
-
-    - name: pdns-admin backend
-      docker_container:
-        name: pdns-admin-uwsgi
-        image: pschiffe/pdns-admin-uwsgi
+    - name: PDNS-admin
+      community.docker.docker_container:
+        name: pdns-admin-mysql
+        image: pschiffe/pdns-admin
         state: '{{ c_state }}'
-        networks_cli_compatible: true
         networks:
-          - name: pdns-net
+          - name: pdns-net-mysql
             aliases:
-              - pdns-admin-uwsgi
+              - pdns-admin
+        published_ports:
+          - '8889:8080'
         volumes:
           - /etc/localtime:/etc/localtime:ro
         env:
-          PDNS_ADMIN_SQLA_DB_PASSWORD: "'my-secret-pw'"
-          PDNS_VERSION: "4.5"
-          PDNS_API_KEY: "secret"
+          PDNS_ADMIN_SQLA_DB_PASSWORD: 'my-secret-pw'
+          PDNS_VERSION: '4.9'
+          PDNS_API_KEY: 'secret'
       tags:
         - pdns-admin
 
-    - name: pdns-admin frontend
-      docker_container:
-        name: pdns-admin-static
-        image: pschiffe/pdns-admin-static
-        state: '{{ c_state }}'
-        networks_cli_compatible: true
-        networks:
-          - name: pdns-net
-        published_ports:
-          - '8889:80'
-        volumes:
-          - /etc/localtime:/etc/localtime:ro
-      tags:
-        - pdns-admin
-
-    - name: remove docker volumes
-      command: docker volume rm pdns-mariadb-volume
-      ignore_errors: true
+    - name: Remove docker volume
+      community.docker.docker_volume:
+        name: pdns-mariadb-volume
+        state: absent
       when: wipe | bool
 
-    - name: remove network
-      docker_network:
-        name: pdns-net
+    - name: Remove network
+      community.docker.docker_network:
+        name: pdns-net-mysql
         state: absent
-      ignore_errors: true
       when: wipe | bool
